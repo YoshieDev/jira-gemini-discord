@@ -1,15 +1,20 @@
-# Imagen base
+# Usa la imagen oficial de Python
 FROM python:3.11-slim
 
-# Carpeta de trabajo
+# Directorio de trabajo
 WORKDIR /app
 
-# Instalar dependencias
+# Copia dependencias
 COPY requirements.txt .
+
+# Instala dependencias
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar el código
-COPY . .
+# Copia el código fuente
+COPY main.py .
 
-# Ejecutar la app
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Expone el puerto (Cloud Run lo asigna dinámicamente)
+EXPOSE 8080
+
+# Comando para iniciar la app
+CMD ["python", "main.py"]
