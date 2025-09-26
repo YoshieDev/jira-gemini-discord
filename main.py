@@ -1,39 +1,57 @@
-from fastapi import FastAPI, Request
-import os
+from flask import Flask, request, jsonify
 import requests
+import os
 
-app = FastAPI()
+app = Flask(__name__)
 
-# Leer variables de entorno
-DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# Usa variables de entorno para mayor seguridad
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-# Endpoint para probar que las variables de entorno funcionan
-@app.get("/test-env")
-async def test_env():
-    return {
-        "discord_webhook": bool(DISCORD_WEBHOOK),
-        "gemini_api_key": bool(GEMINI_API_KEY)
-    }
+@app.route("/", methods=["POST"])
+def jira_webhook():
+    data = request.json
 
-# Endpoint para recibir webhooks de Jira y enviar mensaje de prueba a Discord
-@app.post("/jira-webhook")
-async def jira_webhook(req: Request):
-    data = await req.json()
-    issue = data.get("issue", {})
-    ticket_key = issue.get("key", "UNKNOWN")
-    summary = issue.get("fields", {}).get("summary", "Sin resumen")
-    description = issue.get("fields", {}).get("description", "Sin descripción")
+    if not data or "issue" not in data:
+        return jsonify({"error": "No issue data found"}), 400
 
-    mensaje = {
-        "content": f"Prueba: Ticket **{ticket_key}** pasó a Testing\nResumen: {summary}\nDescripción: {description}"
-    }
+    issue = data["issue"]
+    fields = issue.get("fields", {})
 
-    try:
-        response = requests.post(DISCORD_WEBHOOK, json=mensaje)
-        response.raise_for_status()
-        status = "Mensaje enviado a Discord correctamente"
-    except Exception as e:
-        status = f"Error enviando a Discord: {e}"
+    key = issue.get("key", "No key")
+    summary = fields.get("summary", "No summary")
+    # Ajusta según los custom fields de tu Jira
+    team = fields.get("customfield_team", "No definido")
+    ambiente_qa = fields.get("customfield_ambienteQA", "No definido")
+    assignee = fields.get("assignee", {}).get("displayName", "Sin asignar")
+    status = fields.get("status", {}).get("name", "No definido")
 
-    return {"status": status, "ticket": ticket_key}
+    # Solo enviar notificación si el estado es Testing / QA
+    if status == "Testing / QA":
+        embed = {
+            "title": f"🟢 Ticket en Testing / QA: {key}",
+            "url": issue.get('self').replace('/rest/api/2/issue/', '/browse/'),
+            "color": 3066993,  # Verde
+            "fields": [
+                {"name": "Resumen", "value": summary, "inline": False},
+                {"name": "Team Responsable", "value": team, "inline": True},
+                {"name": "Ambientado QA", "value": ambiente_qa, "inline": True},
+                {"name": "Persona Asignada", "value": assignee, "inline": True},
+                {"name": "Estado", "value": status, "inline": True}
+            ]
+        }
+
+        payload = {"embeds": [embed]}
+
+        try:
+            response = requests.post(DISCORD_WEBHOOK_URL, json=payload)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            print(f"Error enviando a Discord: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    return jsonify({"status": "ok"}), 200
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
