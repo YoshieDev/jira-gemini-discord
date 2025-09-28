@@ -1,8 +1,17 @@
 from flask import Flask, request, jsonify
 import os, requests
+import pandas as pd
+from io import BytesIO
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde .env
+load_dotenv()
+
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 app = Flask(__name__)
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 @app.route("/", methods=["POST"])
 def jira_to_discord():
@@ -11,6 +20,7 @@ def jira_to_discord():
     key = data.get("key")
     status = (data.get("status") or "").strip()
     summary = data.get("summary")
+    description = data.get("description", "")
 
     # 🚫 Ignorar payloads sin datos básicos
     if not key or not summary or not status:
@@ -23,11 +33,10 @@ def jira_to_discord():
     # ✅ Preparar campo Ambientado QA
     ambientado_qa = data.get("ambientado_qa")
     if isinstance(ambientado_qa, list):
-        # Si Jira envía una lista de valores
         ambientado_qa = ", ".join(ambientado_qa)
     ambientado_qa = ambientado_qa or "No definido"
 
-    # ✅ Construir mensaje final
+    # ✅ Construir mensaje para Discord
     message = (
         f"🔔 El ticket {key} pasó a {status}\n"
         f"📌 {summary}\n"
@@ -35,11 +44,42 @@ def jira_to_discord():
         f"🛠 Ambientado QA: {ambientado_qa}\n"
         f"👉 [Ver en Jira]({data.get('url', '#')})"
     )
-
-    # Enviar a Discord
     requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
+
+    # ✅ Generar Excel con Gemini dentro de try/except
+    try:
+        prompt = f"""
+        Genera 10 casos de prueba para este ticket de Jira.
+        Título: {summary}
+        Descripción: {description}
+        Devuelve la información como texto plano.
+        """
+
+        # Inicializamos el cliente dentro de la función para evitar errores al arrancar
+        client = OpenAI(api_key=GEMINI_API_KEY)
+        response = client.chat.completions.create(
+            model="gemini-1.5",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+        text = response.choices[0].message.content
+
+        # Crear Excel en memoria
+        df = pd.DataFrame([text.splitlines()], columns=[f"Casos de prueba para {key}"])
+        excel_buffer = BytesIO()
+        df.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
+
+        # Enviar Excel a Discord
+        files = {"file": (f"{key}_casos_de_prueba.xlsx", excel_buffer)}
+        requests.post(DISCORD_WEBHOOK_URL, files=files, data={"content": f"📄 Casos de prueba generados para {key}"})
+
+    except Exception as e:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": f"❌ Error generando Excel para {key}: {str(e)}"})
 
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    # Puerto dinámico para Cloud Run, fallback 5000 local
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
