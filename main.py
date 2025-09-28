@@ -86,6 +86,5 @@ def jira_to_discord():
     return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
-    # Usar puerto dinámico para Cloud Run
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(port=5000)
+
