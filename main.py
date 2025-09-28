@@ -1,43 +1,91 @@
 from flask import Flask, request, jsonify
 import os, requests
+import pandas as pd
+from io import BytesIO
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde .env
+load_dotenv()
+
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+client = OpenAI(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+# Colores y emojis según estado
+STATUS_CONFIG = {
+    "testing / qa": {"color": 0xE74C3C, "emoji": "🔴"},
+    "done": {"color": 0x2ECC71, "emoji": "🟢"}
+}
 
 @app.route("/", methods=["POST"])
 def jira_to_discord():
     data = request.json or {}
-
     key = data.get("key")
     status = (data.get("status") or "").strip()
     summary = data.get("summary")
+    description = data.get("description", "")
 
-    # 🚫 Ignorar payloads sin datos básicos
     if not key or not summary or not status:
         return jsonify({"status": "ignored", "reason": "faltan campos"}), 200
 
-    # 🚫 Ignorar si NO es exactamente "Testing / QA"
-    if status.lower() not in ["testing / qa", "testing/qa"]:
-        return jsonify({"status": "ignored", "reason": f"status={status}"}), 200
+    # Configuración de color y emoji
+    config = STATUS_CONFIG.get(status.lower(), {"color": 0x3498DB, "emoji": "🔵"})
+    color = config["color"]
+    emoji = config["emoji"]
 
-    # ✅ Preparar campo Ambientado QA
+    # Campo Ambientado QA
     ambientado_qa = data.get("ambientado_qa")
     if isinstance(ambientado_qa, list):
-        # Si Jira envía una lista de valores
         ambientado_qa = ", ".join(ambientado_qa)
     ambientado_qa = ambientado_qa or "No definido"
 
-    # ✅ Construir mensaje final
-    message = (
-        f"🔔 El ticket {key} pasó a {status}\n"
-        f"📌 {summary}\n"
-        f"👤 Asignado a: {data.get('assignee', 'Sin asignar')}\n"
-        f"🛠 Ambientado QA: {ambientado_qa}\n"
-        f"👉 [Ver en Jira]({data.get('url', '#')})"
-    )
+    # Embed de Discord
+    embed = {
+        "title": f"{emoji} Ticket {key} pasó a {status}",
+        "url": data.get("url", "#"),
+        "color": color,
+        "fields": [
+            {"name": "📌 Resumen", "value": summary, "inline": False},
+            {"name": "👤 Asignado a", "value": data.get("assignee", "Sin asignar"), "inline": True},
+            {"name": "🛠 Ambientado QA", "value": ambientado_qa, "inline": True}
+        ]
+    }
+    requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
 
-    # Enviar a Discord
-    requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
+    # Solo generar casos de prueba si Testing / QA
+    if status.lower() in ["testing / qa", "testing/qa"]:
+        prompt = f"""
+        Genera 10 casos de prueba para este ticket de Jira.
+        Título: {summary}
+        Descripción: {description}
+        Devuelve la información en CSV con columnas:
+        Caso #, Descripción, Entrada, Acción, Resultado esperado
+        """
+        try:
+            response = client.chat.completions.create(
+                model="gemini-1.5",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7
+            )
+            text = response.choices[0].message.content
+
+            # Convertir CSV a DataFrame
+            df = pd.read_csv(BytesIO(text.encode()))
+        except:
+            df = pd.DataFrame([["Error al generar CSV"]], columns=["Info"])
+
+        # Guardar Excel en memoria
+        excel_buffer = BytesIO()
+        df.to_excel(excel_buffer, index=False)
+        excel_buffer.seek(0)
+
+        # Subir archivo a Discord
+        files = {"file": (f"{key}_casos_de_prueba.xlsx", excel_buffer)}
+        requests.post(DISCORD_WEBHOOK_URL, files=files, data={"content": f"📄 Casos de prueba generados para {key}"})
 
     return jsonify({"status": "ok"}), 200
 
