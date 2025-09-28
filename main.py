@@ -5,7 +5,7 @@ from io import BytesIO
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env
+# Cargar variables de entorno
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -15,7 +15,6 @@ client = OpenAI(api_key=GEMINI_API_KEY)
 
 app = Flask(__name__)
 
-# Colores y emojis según estado
 STATUS_CONFIG = {
     "testing / qa": {"color": 0xE74C3C, "emoji": "🔴"},
     "done": {"color": 0x2ECC71, "emoji": "🟢"}
@@ -24,6 +23,7 @@ STATUS_CONFIG = {
 @app.route("/", methods=["POST"])
 def jira_to_discord():
     data = request.json or {}
+
     key = data.get("key")
     status = (data.get("status") or "").strip()
     summary = data.get("summary")
@@ -56,36 +56,39 @@ def jira_to_discord():
     }
     requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [embed]})
 
-    # Solo generar casos de prueba si Testing / QA
+    # Solo generar Excel si Testing / QA
     if status.lower() in ["testing / qa", "testing/qa"]:
-        prompt = f"""
-        Genera 10 casos de prueba para este ticket de Jira.
-        Título: {summary}
-        Descripción: {description}
-        Devuelve la información en CSV con columnas:
-        Caso #, Descripción, Entrada, Acción, Resultado esperado
-        """
         try:
+            prompt = f"""
+            Genera 10 casos de prueba para este ticket de Jira.
+            Título: {summary}
+            Descripción: {description}
+            Devuelve la información como texto plano.
+            """
+
             response = client.chat.completions.create(
                 model="gemini-1.5",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7
             )
+
             text = response.choices[0].message.content
 
-            # Convertir CSV a DataFrame
-            df = pd.read_csv(BytesIO(text.encode()))
-        except:
-            df = pd.DataFrame([["Error al generar CSV"]], columns=["Info"])
+            # Crear Excel con texto plano
+            df = pd.DataFrame([text.splitlines()], columns=[f"Casos de prueba para {key}"])
 
-        # Guardar Excel en memoria
-        excel_buffer = BytesIO()
-        df.to_excel(excel_buffer, index=False)
-        excel_buffer.seek(0)
+            # Guardar Excel en memoria
+            excel_buffer = BytesIO()
+            df.to_excel(excel_buffer, index=False)
+            excel_buffer.seek(0)
 
-        # Subir archivo a Discord
-        files = {"file": (f"{key}_casos_de_prueba.xlsx", excel_buffer)}
-        requests.post(DISCORD_WEBHOOK_URL, files=files, data={"content": f"📄 Casos de prueba generados para {key}"})
+            # Subir archivo a Discord
+            files = {"file": (f"{key}_casos_de_prueba.xlsx", excel_buffer)}
+            requests.post(DISCORD_WEBHOOK_URL, files=files, data={"content": f"📄 Casos de prueba generados para {key}"})
+
+        except Exception as e:
+            # Enviar error a Discord
+            requests.post(DISCORD_WEBHOOK_URL, json={"content": f"❌ Error generando casos de prueba para {key}: {str(e)}"})
 
     return jsonify({"status": "ok"}), 200
 
