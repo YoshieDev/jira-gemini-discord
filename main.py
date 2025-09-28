@@ -1,39 +1,45 @@
-from fastapi import FastAPI, Request
-import os
+from flask import Flask, request, jsonify
 import requests
+import os
 
-app = FastAPI()
+app = Flask(__name__)  # 👈 instancia de Flask
 
-# Leer variables de entorno
-DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# Tu webhook de Discord se obtiene de la variable de entorno
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
-# Endpoint para probar que las variables de entorno funcionan
-@app.get("/test-env")
-async def test_env():
-    return {
-        "discord_webhook": bool(DISCORD_WEBHOOK),
-        "gemini_api_key": bool(GEMINI_API_KEY)
-    }
-
-# Endpoint para recibir webhooks de Jira y enviar mensaje de prueba a Discord
-@app.post("/jira-webhook")
-async def jira_webhook(req: Request):
-    data = await req.json()
-    issue = data.get("issue", {})
-    ticket_key = issue.get("key", "UNKNOWN")
-    summary = issue.get("fields", {}).get("summary", "Sin resumen")
-    description = issue.get("fields", {}).get("description", "Sin descripción")
-
-    mensaje = {
-        "content": f"Prueba: Ticket **{ticket_key}** pasó a Testing\nResumen: {summary}\nDescripción: {description}"
-    }
-
+@app.route("/", methods=["POST"])
+def jira_webhook():
     try:
-        response = requests.post(DISCORD_WEBHOOK, json=mensaje)
-        response.raise_for_status()
-        status = "Mensaje enviado a Discord correctamente"
-    except Exception as e:
-        status = f"Error enviando a Discord: {e}"
+        # Intentar parsear el JSON recibido
+        data = request.get_json(force=True, silent=True) or {}
 
-    return {"status": status, "ticket": ticket_key}
+        # Valores por defecto si faltan campos
+        issue_key = data.get("key", "UNKNOWN")
+        summary = data.get("summary", "Sin resumen")
+        url = data.get("url", "#")
+        status = data.get("status", "Sin estado")
+        assignee = data.get("assignee") or "Sin asignar"
+
+        # Construir mensaje para Discord
+        message = {
+            "content": (
+                f"🔔 El ticket **{issue_key}** pasó a *{status}*\n"
+                f"📌 {summary}\n"
+                f"👤 Asignado a: {assignee}\n"
+                f"👉 [Ver en Jira]({url})"
+            )
+        }
+
+        # Enviar mensaje a Discord
+        resp = requests.post(DISCORD_WEBHOOK_URL, json=message)
+        if resp.status_code != 204:
+            return jsonify({"error": "Error enviando a Discord", "status": resp.status_code}), 500
+
+        return jsonify({"status": "ok"}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))

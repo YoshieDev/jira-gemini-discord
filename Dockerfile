@@ -1,15 +1,18 @@
-# Imagen base
+# Imagen base ligera con Python
 FROM python:3.11-slim
 
-# Carpeta de trabajo
+# Configuración de directorio de trabajo
 WORKDIR /app
 
-# Instalar dependencias
+# Copiar dependencias e instalarlas
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar el código
 COPY . .
 
-# Ejecutar la app
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Exponer el puerto
+EXPOSE 8080
+
+# Comando de inicio (gunicorn ejecutando main:app)
+CMD ["gunicorn", "-b", ":8080", "main:app"]
