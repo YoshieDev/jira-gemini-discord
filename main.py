@@ -4,9 +4,13 @@ import json
 import time
 import pandas as pd
 from datetime import datetime
+from dotenv import load_dotenv   # 👈 nuevo
+
+# --- Cargar variables desde .env ---
+load_dotenv()
 
 # --- CONFIGURACIÓN DE LA API DE GEMINI ---
-GEMINI_API_KEY = "AIzaSyDHoHWHHcaYKe2v0WTiWwg-WFQKAAp_-Uk"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
 # ----------------------------------------
 
@@ -129,27 +133,29 @@ def jira_to_discord():
     if test_cases_list:
         excel_file = save_test_cases_to_excel(test_cases_list, key)
 
-    # 3. Formatear para Discord
-    discord_format = "\n\n---\n\n## 🤖 Casos de Prueba Generados (QA)\n"
-    for i, tc in enumerate(test_cases_list, 1):
-        discord_format += (
-            f"### 🧪 Caso {i}: {tc.get('caseTitle', '')}\n"
-            f"**Datos de prueba:** {tc.get('testData','No definido')}\n"
-            f"**Resultado Esperado:** {tc.get('expectedResult','')}\n"
-            f"**Pasos:**\n"
-        )
-        for j, step in enumerate(tc.get('steps', []), 1):
-            discord_format += f"{j}. {step}\n"
-        discord_format += "\n---\n"
-
+        # 3. Mensaje principal de notificación
     message = (
         f"🔔 El ticket {key} pasó a **{status}**\n"
         f"📌 **Resumen:** {summary}\n"
         f"👤 Asignado a: {data.get('assignee', 'Sin asignar')}\n"
         f"🛠 **Ambientado QA:** {ambientado_qa}\n"
-        f"👉 [Ver en Jira]({data.get('url', '#')})"
-        f"{discord_format}"
+        f"👉 [Ver en Jira]({data.get('url', '#' )})"
     )
+
+    # 4. Casos de prueba generados
+    if test_cases_list:
+        message += "\n\n---\n\n## 🤖 Casos de Prueba Generados (QA)\n"
+        for i, tc in enumerate(test_cases_list, 1):
+            message += (
+                f"### 🧪 Caso {i}: {tc.get('caseTitle', '')}\n"
+                f"**Datos de prueba:** {tc.get('testData','No definido')}\n"
+                f"**Resultado Esperado:** {tc.get('expectedResult','')}\n"
+                f"**Pasos:**\n"
+            )
+            for j, step in enumerate(tc.get('steps', []), 1):
+                message += f"{j}. {step}\n"
+            message += "\n---\n"
+
 
     try:
         requests.post(DISCORD_WEBHOOK_URL, json={"content": message})
