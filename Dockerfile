@@ -1,31 +1,17 @@
-<<<<<<< HEAD
-# Usa la imagen oficial de Python
+# Imagen base de Python
 FROM python:3.11-slim
 
-# Directorio de trabajo
+# Setear directorio de trabajo
 WORKDIR /app
 
-# Copia dependencias
-=======
-FROM python:3.11-slim
-WORKDIR /app
->>>>>>> a52c7ca3cdcdbb41ae803c0ed57a1b7771097596
+# Copiar archivos
 COPY requirements.txt .
-
-# Instala dependencias
 RUN pip install --no-cache-dir -r requirements.txt
-<<<<<<< HEAD
 
-# Copia el código fuente
-COPY main.py .
-
-# Expone el puerto (Cloud Run lo asigna dinámicamente)
-EXPOSE 8080
-
-# Comando para iniciar la app
-CMD ["python", "main.py"]
-=======
 COPY . .
-EXPOSE 8080
-CMD ["gunicorn", "-b", ":8080", "main:app"]
->>>>>>> a52c7ca3cdcdbb41ae803c0ed57a1b7771097596
+
+# Cloud Run expone el puerto 8080 por defecto
+ENV PORT=8080
+
+# Comando de inicio con gunicorn (producción)
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 main:app

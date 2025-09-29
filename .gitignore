@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 *.xlsx
+
+
+gcloud run services update jira-gemini-discord \
+  --update-env-vars DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/1418452122676105336/0DwnibFBHNB36GCYvZLg4udCNg0RkznBuXJnDk_SWdlpymXQbl_QaUkrJfh_OqPTrLSb" \
+  --update-env-vars GEMINI_API_KEY="AIzaSyDHoHWHHcaYKe2v0WTiWwg-WFQKAAp_-Uk"
